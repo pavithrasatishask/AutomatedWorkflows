@@ -1,0 +1,452 @@
+{
+  "name": "Sprint Multi-Checkpoint Monitoring Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// === Upload to Azure Blob Multi-Checkpoint (FIXED VERSION) ===\nconst config = $('Set Sprint Config').first().json;\nconst storageAccount = config.azureStorageAccount;\nconst containerName = config.azureContainer;\n\n// Get SAS token from config\nconst sasToken = 'sv=2024-11-04&ss=bfqt&srt=sco&sp=rwdlacupiytfx&se=2026-12-31T16:57:58Z&st=2026-01-27T08:42:58Z&spr=https&sig=%2BXuCaMNIIcFmDNJn2DqnD%2B5S%2FJP1KT6VdH8KasOT5oY%3D';\n\nconst items = $input.all();\nconsole.log(`📦 Processing ${items.length} files for upload...`);\n\nconst results = [];\n\nfor (const item of items) {\n  const filename = item.json.filename;\n  const content = item.json.content;\n  const sprintNumber = item.json.sprintNumber;\n  const checkType = item.json.checkType;  // ← CRITICAL: Get checkType\n  \n  // Organize by checkpoint type in blob storage\n  const blobName = `Sprint_${sprintNumber}/${checkType}/${filename}`;\n  \n  const blobUrl = `https://${storageAccount}.blob.core.windows.net/${containerName}/${blobName}`;\n  const uploadUrl = `${blobUrl}?${sasToken}`;\n  \n  console.log(`✅ Prepared: ${filename} (${checkType})`);\n  \n  // CRITICAL: Pass ALL checkpoint data forward\n  results.push({\n    uploadUrl: uploadUrl,\n    content: content,\n    filename: filename,\n    blobName: blobName,\n    sasUrl: uploadUrl,\n    category: item.json.category,\n    count: item.json.count,\n    description: item.json.description,\n    // CRITICAL: Preserve checkpoint metadata\n    sprintNumber: item.json.sprintNumber,\n    releaseVersion: item.json.releaseVersion,\n    checkType: item.json.checkType,  // ← CRITICAL\n    sprintDay: item.json.sprintDay,  // ← CRITICAL\n    byState: item.json.byState || {},\n    planningLiveByState: item.json.planningLiveByState || {},\n    planningLiveCount: item.json.planningLiveCount || 0,\n    devOnlyCount: item.json.devOnlyCount || 0,\n    supportCount: item.json.supportCount || 0,\n    needingUpdateCount: item.json.needingUpdateCount || 0,\n    totalCount: item.json.totalCount || 0,\n    // Checkpoint-specific counts\n    day5IssuesCount: item.json.day5IssuesCount || 0,\n    notInTestingCount: item.json.notInTestingCount || 0,\n    riskItemsCount: item.json.riskItemsCount || 0\n  });\n}\n\nconsole.log(`📊 Prepared ${results.length} files for upload to ${results[0]?.checkType || 'UNKNOWN'}`);\n\nreturn results.map(r => ({ json: r }));"
+      },
+      "name": "Upload to Azure Blob & Generate SAS URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        -640
+      ],
+      "id": "66b7472e-a5df-4fde-a579-00afe9a812eb",
+      "notes": "Uploads CSV to Azure Blob Storage and generates a 7-day SAS URL for secure sharing"
+    },
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "custom",
+              "cronExpression": "0 8 */14 * 1"
+            }
+          ]
+        }
+      },
+      "name": "Monday 8 AM Every 2 Weeks4",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        -352,
+        -640
+      ],
+      "id": "ffa1d9da-5b09-4ea9-8b4a-182f9d7ef70d"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === Generate Adaptive Card for Teams - Multi Checkpoint (With Celebration Messages) ===\nconst allItems = $input.all();\nconst firstItem = allItems[0].json;\n\n// Get metadata\nconst sprintNumber = firstItem.sprintNumber || 'Unknown';\nconst releaseVersion = firstItem.releaseVersion || 'Unknown';\nconst checkType = firstItem.checkType || 'DAY2_INVENTORY';\nconsole.log('🔍 DEBUG: firstItem.checkType =', firstItem.checkType);\nconsole.log('🔍 DEBUG: checkType =', checkType);\nconsole.log('🔍 DEBUG: firstItem keys =', Object.keys(firstItem));\nconst sprintDay = firstItem.sprintDay || 2;\nconst totalCount = firstItem.totalCount || 0;\nconst planningLiveCount = firstItem.planningLiveCount || 0;\nconst devOnlyCount = firstItem.devOnlyCount || 0;\nconst supportCount = firstItem.supportCount || 0;\nconst needingUpdateCount = firstItem.needingUpdateCount || 0;\nconst byState = firstItem.byState || {};\nconst planningLiveByState = firstItem.planningLiveByState || {};\n\n// Get checkpoint-specific counts\nconst day5IssuesCount = firstItem.day5IssuesCount || 0;\nconst notInTestingCount = firstItem.notInTestingCount || 0;\nconst riskItemsCount = firstItem.riskItemsCount || 0;\n\nconsole.log(`🎨 Generating Teams message for ${checkType}...`);\n\n// Build file links from Azure Blob SAS URLs\nconst emojiMap = {\n  'All PBIs': '📊',\n  'Planning Live': '🟩',\n  'DEV Only': '🟣',\n  'Support Tickets': '🎫',\n  'Needing Status Update': '⚠️',\n  'Planning Live - Not Started': '⚠️',\n  'DEV Only - Not Started': '⚠️',\n  'Planning Live - Not Yet Testing': '🧪',\n  'All Planning Live Items': '📋',\n  '🚨 HIGH RISK - Not Testing': '🚨'\n};\n\nconst fileLinks = allItems.map(item => {\n  const emoji = emojiMap[item.json.category] || '📄';\n  \n  return {\n    emoji,\n    category: item.json.category || 'Unknown',\n    count: item.json.count || 0,\n    url: item.json.sasUrl || item.json.uploadUrl || '#',\n    filename: item.json.filename || 'file.csv',\n    description: item.json.description || 'No description'\n  };\n});\n\nconst fileLinksText = fileLinks.map(link => \n  `${link.emoji} **[${link.category}](${link.url})** (${link.count} items)  \\n${link.description}`\n).join('\\n\\n');\n\n// Build status breakdown text\nconst buildStatusText = (stateObj) => {\n  return Object.entries(stateObj)\n    .sort(([,a], [,b]) => b - a)\n    .map(([state, count]) => {\n      const emoji = {\n        'Done': '✅',\n        'Closed': '✅',\n        'Testing': '🧪',\n        'In Progress': '⚡',\n        'Hold': '⏸️',\n        'New': '⚠️',\n        'Approved': '⚠️',\n        'Ready for Live': '🟢',\n        'Planned': '📋',\n        'Test Complete': '✔️',\n        'Re-Assigned to Support': '🔄'\n      }[state] || '•';\n      return `${emoji} **${state}:** ${count}`;\n    }).join('  \\n');\n};\n\nconst statusText = buildStatusText(byState);\nconst planningLiveStatusText = Object.keys(planningLiveByState).length > 0 \n  ? buildStatusText(planningLiveByState)\n  : 'No Planning Live items';\n\n// Initialize adaptive card structure\nlet title = '';\nlet headerColor = 'Accent';\nlet bodyContent = [];\nlet actionSection = null;\n\n// ========================================\n// DAY 2: Full Inventory\n// ========================================\nif (checkType === 'DAY2_INVENTORY') {\n  title = `📋 Sprint ${sprintNumber} Kickoff - Day 2 Inventory`;\n  headerColor = 'Accent';\n  \n  bodyContent = [\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"📊 Sprint Overview\",\n      \"weight\": \"Bolder\",\n      \"size\": \"Medium\"\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": `**Total PBIs:** ${totalCount}  \\n🟩 **Planning Live:** ${planningLiveCount}  \\n🟣 **DEV Only:** ${devOnlyCount}  \\n🎫 **Support Tickets:** ${supportCount}  \\n⚠️ **Needing Status Update:** ${needingUpdateCount}`,\n      \"wrap\": true\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\",\n      \"spacing\": \"Medium\",\n      \"separator\": true\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"📈 Status Breakdown\",\n      \"weight\": \"Bolder\",\n      \"size\": \"Medium\"\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": statusText,\n      \"wrap\": true\n    }\n  ];\n  \n  if (needingUpdateCount > 0) {\n    actionSection = {\n      \"type\": \"Container\",\n      \"style\": \"warning\",\n      \"items\": [\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"⚠️ Action Required\",\n          \"weight\": \"Bolder\",\n          \"color\": \"Warning\",\n          \"size\": \"Medium\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": `**${needingUpdateCount}** items are still in **New**, **Approved**, or **Ready for Live** status.`,\n          \"wrap\": true\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"📋 Download the **\\\"Needing Status Update\\\"** file above for the complete list.\",\n          \"wrap\": true\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"**Team members:** Please update the status of your assigned items to reflect actual progress!\",\n          \"wrap\": true,\n          \"weight\": \"Bolder\"\n        }\n      ]\n    };\n  } else {\n    actionSection = {\n      \"type\": \"Container\",\n      \"style\": \"good\",\n      \"items\": [\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"✅ All Items Have Current Status\",\n          \"weight\": \"Bolder\",\n          \"color\": \"Good\",\n          \"size\": \"Medium\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"Great job! All PBIs have been updated with appropriate status.\",\n          \"wrap\": true\n        }\n      ]\n    };\n  }\n}\n\n// ========================================\n// DAY 5: Status Progress Check\n// ========================================\nif (checkType === 'DAY5_STATUS_CHECK') {\n  title = day5IssuesCount > 0 \n    ? `⚠️ Sprint ${sprintNumber} - Day 5 Status Check` \n    : `✅ Sprint ${sprintNumber} - Day 5 Status Check`;\n  headerColor = day5IssuesCount > 0 ? 'Warning' : 'Good';\n  \n  bodyContent = [\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"📊 Sprint Progress\",\n      \"weight\": \"Bolder\",\n      \"size\": \"Medium\"\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": `**Total PBIs:** ${totalCount}  \\n🟩 **Planning Live:** ${planningLiveCount}  \\n🟣 **DEV Only:** ${devOnlyCount}  \\n${day5IssuesCount > 0 ? '⚠️' : '✅'} **Items Not Started:** ${day5IssuesCount}`,\n      \"wrap\": true\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\",\n      \"spacing\": \"Medium\",\n      \"separator\": true\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"📈 Planning Live Status\",\n      \"weight\": \"Bolder\",\n      \"size\": \"Medium\"\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": planningLiveStatusText,\n      \"wrap\": true\n    }\n  ];\n  \n  if (day5IssuesCount > 0) {\n    actionSection = {\n      \"type\": \"Container\",\n      \"style\": \"warning\",\n      \"items\": [\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"⚠️ Items Not Started\",\n          \"weight\": \"Bolder\",\n          \"color\": \"Warning\",\n          \"size\": \"Medium\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": `**${day5IssuesCount}** Planning Live and DEV Only items are still in **New** or **Approved** or **Planned** status.`,\n          \"wrap\": true\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"**Expected:** All items should be **In Progress** by Day 5.\",\n          \"wrap\": true\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"📋 Download the CSV files above and follow up with assigned team members.\",\n          \"wrap\": true,\n          \"weight\": \"Bolder\"\n        }\n      ]\n    };\n  } else {\n    actionSection = {\n      \"type\": \"Container\",\n      \"style\": \"good\",\n      \"items\": [\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"🎉 Excellent Progress! All Items Started\",\n          \"weight\": \"Bolder\",\n          \"color\": \"Good\",\n          \"size\": \"Large\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"**Outstanding work, team!** All Planning Live and DEV Only items have been moved to **In Progress** status.\",\n          \"wrap\": true,\n          \"size\": \"Medium\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"✨ **You're on track!** Keep up the momentum as we head into Week 2.\",\n          \"wrap\": true,\n          \"weight\": \"Bolder\"\n        }\n      ]\n    };\n  }\n}\n\n// ========================================\n// DAY 6-8: Testing Assignment Check\n// ========================================\nif (checkType === 'DAY6_8_TESTING_CHECK') {\n  const testingCount = planningLiveByState['Testing'] || 0;\n  const doneCount = (planningLiveByState['Done'] || 0) + (planningLiveByState['Closed'] || 0);\n  const completedCount = testingCount + doneCount;\n  const progressPercentage = planningLiveCount > 0 \n    ? Math.round((completedCount / planningLiveCount) * 100) \n    : 0;\n  \n  title = notInTestingCount > 0\n    ? `${sprintDay >= 8 ? '🚨' : '⚠️'} Sprint ${sprintNumber} - Day ${sprintDay} Testing Check`\n    : `✅ Sprint ${sprintNumber} - Day ${sprintDay} Testing Check`;\n  headerColor = notInTestingCount > 0 ? (sprintDay >= 8 ? 'Attention' : 'Warning') : 'Good';\n  \n  bodyContent = [\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"📊 Planning Live Progress\",\n      \"weight\": \"Bolder\",\n      \"size\": \"Medium\"\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": `**Total Planning Live:** ${planningLiveCount}  \\n🧪 **In Testing:** ${testingCount}  \\n✅ **Done:** ${doneCount}  \\n📈 **Progress:** ${progressPercentage}%  \\n${notInTestingCount > 0 ? '⚠️' : '✅'} **Not Yet Testing:** ${notInTestingCount}`,\n      \"wrap\": true\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\",\n      \"spacing\": \"Medium\",\n      \"separator\": true\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"📈 Planning Live Status\",\n      \"weight\": \"Bolder\",\n      \"size\": \"Medium\"\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": planningLiveStatusText,\n      \"wrap\": true\n    }\n  ];\n  \n  if (notInTestingCount > 0) {\n    const isUrgent = sprintDay >= 8;\n    actionSection = {\n      \"type\": \"Container\",\n      \"style\": isUrgent ? \"attention\" : \"warning\",\n      \"items\": [\n        {\n          \"type\": \"TextBlock\",\n          \"text\": isUrgent ? \"🚨 Urgent: Items Not in Testing\" : \"⚠️ Items Not Yet in Testing\",\n          \"weight\": \"Bolder\",\n          \"color\": isUrgent ? \"Attention\" : \"Warning\",\n          \"size\": \"Medium\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": `**${notInTestingCount}** Planning Live items (${Math.round((notInTestingCount/planningLiveCount)*100)}%) are not in **Testing** status.`,\n          \"wrap\": true\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": isUrgent \n            ? \"**CRITICAL:** We are in Week 2. These items need testing NOW.\" \n            : \"**Expected:** Items should be in testing by Week 2.\",\n          \"wrap\": true,\n          \"weight\": \"Bolder\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": isUrgent\n            ? \"📋 Download CSV and review immediately. Consider moving items to next sprint if blocked.\"\n            : \"📋 Download CSV above. Prioritize completing development and assign for testing.\",\n          \"wrap\": true\n        }\n      ]\n    };\n  } else {\n    actionSection = {\n      \"type\": \"Container\",\n      \"style\": \"good\",\n      \"items\": [\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"🎉 Perfect! All Items in Testing Phase\",\n          \"weight\": \"Bolder\",\n          \"color\": \"Good\",\n          \"size\": \"Large\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": `**Amazing work, team!** All ${planningLiveCount} Planning Live items are in **Testing** or **Done** status.`,\n          \"wrap\": true,\n          \"size\": \"Medium\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": `✨ **${progressPercentage}% complete!** You're ahead of schedule. Focus on completing testing and preparing for deployment.`,\n          \"wrap\": true,\n          \"weight\": \"Bolder\"\n        }\n      ]\n    };\n  }\n}\n\n// ========================================\n// DAY 9: Risk Assessment\n// ========================================\nif (checkType === 'DAY9_RISK_ASSESSMENT') {\n  const testingCount = planningLiveByState['Testing'] || 0;\n  const doneCount = (planningLiveByState['Done'] || 0) + (planningLiveByState['Ready for Live'] || 0);\n  const completedCount = testingCount + doneCount;\n  const progressPercentage = planningLiveCount > 0 \n    ? Math.round((completedCount / planningLiveCount) * 100) \n    : 0;\n  const atRiskPercentage = planningLiveCount > 0 \n    ? Math.round((riskItemsCount / planningLiveCount) * 100) \n    : 0;\n  \n  title = riskItemsCount > 0\n    ? `🚨 Sprint ${sprintNumber} - Day 9 RISK Assessment`\n    : `🏆 Sprint ${sprintNumber} - Day 9 Success!`;\n  headerColor = riskItemsCount > 0 ? 'Attention' : 'Good';\n  \n  bodyContent = [\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"📊 Sprint Completion Status\",\n      \"weight\": \"Bolder\",\n      \"size\": \"Medium\"\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": `**Total Planning Live:** ${planningLiveCount}  \\n🧪 **In Testing:** ${testingCount}  \\n✅ **Done:** ${doneCount}  \\n📈 **Completion Rate:** ${progressPercentage}%  \\n${riskItemsCount > 0 ? '🚨' : '✅'} **High Risk Items:** ${riskItemsCount} (${atRiskPercentage}%)`,\n      \"wrap\": true\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\",\n      \"spacing\": \"Medium\",\n      \"separator\": true\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"📈 Planning Live Status\",\n      \"weight\": \"Bolder\",\n      \"size\": \"Medium\"\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": planningLiveStatusText,\n      \"wrap\": true\n    }\n  ];\n  \n  if (riskItemsCount > 0) {\n    actionSection = {\n      \"type\": \"Container\",\n      \"style\": \"attention\",\n      \"items\": [\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"🚨 HIGH RISK - Sprint Completion Threatened\",\n          \"weight\": \"Bolder\",\n          \"color\": \"Attention\",\n          \"size\": \"Large\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": `**${riskItemsCount}** Planning Live items (${atRiskPercentage}%) are STILL not in **Testing** on Day 9.`,\n          \"wrap\": true,\n          \"weight\": \"Bolder\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"**These items have LESS THAN 1 DAY to complete development, testing, and deployment.**\",\n          \"wrap\": true,\n          \"color\": \"Attention\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"**IMMEDIATE ACTIONS:**\",\n          \"wrap\": true,\n          \"weight\": \"Bolder\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"🔴 Download HIGH RISK CSV file immediately  \\n🔴 Hold emergency meeting with team leads  \\n🔴 Decide: Push to production (risky), move to next sprint (recommended), or cancel  \\n🔴 Inform stakeholders of changes\",\n          \"wrap\": true\n        }\n      ]\n    };\n  } else {\n    actionSection = {\n      \"type\": \"Container\",\n      \"style\": \"good\",\n      \"items\": [\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"🏆 Sprint Complete - No Risk Items!\",\n          \"weight\": \"Bolder\",\n          \"color\": \"Good\",\n          \"size\": \"ExtraLarge\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": `**Phenomenal execution!** All ${planningLiveCount} Planning Live items are on track for successful completion.`,\n          \"wrap\": true,\n          \"size\": \"Large\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": `🎯 **${progressPercentage}% completion rate** - You've crushed this sprint!`,\n          \"wrap\": true,\n          \"weight\": \"Bolder\",\n          \"size\": \"Medium\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"**Final Day Focus:**\",\n          \"wrap\": true,\n          \"weight\": \"Bolder\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"✅ Complete any remaining testing  \\n✅ Final QA verification  \\n✅ Prepare deployment documentation  \\n✅ Get ready for retrospective\",\n          \"wrap\": true\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"🌟 **Great job, team! This is what excellent sprint execution looks like!**\",\n          \"wrap\": true,\n          \"weight\": \"Bolder\",\n          \"size\": \"Medium\",\n          \"color\": \"Good\"\n        }\n      ]\n    };\n  }\n}\n\n// ========================================\n// Build Final Adaptive Card\n// ========================================\nconst adaptiveCard = {\n  \"type\": \"AdaptiveCard\",\n  \"$schema\": \"http://adaptivecards.io/schemas/adaptive-card.json\",\n  \"version\": \"1.4\",\n  \"body\": [\n    {\n      \"type\": \"TextBlock\",\n      \"text\": title,\n      \"weight\": \"Bolder\",\n      \"size\": \"Large\",\n      \"color\": headerColor\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": `**Release:** ${releaseVersion}`,\n      \"wrap\": true,\n      \"spacing\": \"Small\"\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\",\n      \"spacing\": \"Medium\",\n      \"separator\": true\n    }\n  ]\n};\n\n// Add checkpoint-specific content\nadaptiveCard.body.push(...bodyContent);\n\n// Add file download section (only if there are files)\nif (fileLinks.length > 0) {\n  adaptiveCard.body.push(\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\",\n      \"spacing\": \"Medium\",\n      \"separator\": true\n    },\n    {\n      \"type\": \"Container\",\n      \"style\": \"emphasis\",\n      \"items\": [\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"📎 Download Sprint Reports\",\n          \"weight\": \"Bolder\",\n          \"size\": \"Medium\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"**Click any link below to download CSV files:**\",\n          \"wrap\": true,\n          \"spacing\": \"Small\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": fileLinksText,\n          \"wrap\": true\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"💡 Files are stored in Azure Blob Storage. Links valid for 7 days.\",\n          \"wrap\": true,\n          \"isSubtle\": true,\n          \"size\": \"Small\",\n          \"spacing\": \"Medium\"\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"📥 CSV files can be opened directly in Excel\",\n          \"wrap\": true,\n          \"isSubtle\": true,\n          \"size\": \"Small\"\n        }\n      ]\n    }\n  );\n}\n\n// Add action/warning section\nif (actionSection) {\n  adaptiveCard.body.push(\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\",\n      \"spacing\": \"Medium\",\n      \"separator\": true\n    },\n    actionSection\n  );\n}\n\nconsole.log(`✅ Generated ${checkType} Teams message with ${day5IssuesCount || notInTestingCount || riskItemsCount || needingUpdateCount} issues`);\n\n// Return the adaptive card\nreturn [{ json: { adaptiveCard: adaptiveCard } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1856,
+        -640
+      ],
+      "id": "9e9ced75-7b15-4fc7-aa75-d4ffd59f55a5",
+      "name": "Generate Teams Message2"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $json.uploadUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "text/csv"
+            },
+            {
+              "name": "x-ms-blob-type",
+              "value": "BlockBlob"
+            },
+            {
+              "name": "x-ms-version",
+              "value": "2021-08-06"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "body": "=={{ $json.content }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1456,
+        -640
+      ],
+      "id": "62f99dfe-5f0b-4805-8cd2-0d17d3d45b85",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === Collect All Upload Results and Preserve Metadata ===\n\n// Get all items from HTTP Request node\nconst httpItems = $('HTTP Request').all();\n\n// Get all items from the prepare node (before HTTP request)\nconst prepareItems = $('Upload to Azure Blob & Generate SAS URL').all();\n\nconsole.log(`📊 Collecting ${httpItems.length} upload results`);\n\n// Merge HTTP response with original metadata\nconst results = httpItems.map((httpItem, index) => {\n  const originalData = prepareItems[index].json;\n  \n  return {\n    // HTTP response status\n    success: httpItem.json.statusCode >= 200 && httpItem.json.statusCode < 300,\n    statusCode: httpItem.json.statusCode,\n    \n    // Preserve all original metadata\n    filename: originalData.filename,\n    category: originalData.category,\n    count: originalData.count,\n    description: originalData.description,\n    sasUrl: originalData.sasUrl,\n    sprintNumber: originalData.sprintNumber,\n    releaseVersion: originalData.releaseVersion,\n    \n    // ⭐ CRITICAL: Preserve checkpoint metadata\n    checkType: originalData.checkType,\n    sprintDay: originalData.sprintDay,\n    \n    // Status breakdowns\n    byState: originalData.byState,\n    planningLiveByState: originalData.planningLiveByState,\n    \n    // Counts\n    planningLiveCount: originalData.planningLiveCount,\n    devOnlyCount: originalData.devOnlyCount,\n    supportCount: originalData.supportCount,\n    needingUpdateCount: originalData.needingUpdateCount,\n    totalCount: originalData.totalCount,\n    \n    // ⭐ CRITICAL: Checkpoint-specific counts\n    day5IssuesCount: originalData.day5IssuesCount,\n    notInTestingCount: originalData.notInTestingCount,\n    riskItemsCount: originalData.riskItemsCount\n  };\n});\n\nconsole.log(`✅ Merged ${results.length} results with metadata`);\nconsole.log(`✅ CheckType: ${results[0]?.checkType || 'MISSING'}`);\n\n// Return as separate items\nreturn results.map(r => ({ json: r }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1664,
+        -624
+      ],
+      "id": "1fe504f5-4ad1-4784-af3e-3f9488077ed1",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Set Sprint Config').first().json.teamsWorkflowUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"message\",\n  \"attachments\": [\n    {\n      \"contentType\": \"application/vnd.microsoft.card.adaptive\",\n      \"content\": {{ JSON.stringify($json.adaptiveCard) }}\n    }\n  ]\n}",
+        "options": {}
+      },
+      "name": "Send to Teams via Webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2064,
+        -640
+      ],
+      "id": "26bc5080-2e68-4806-9372-8e87a5d975f8"
+    },
+    {
+      "parameters": {
+        "content": "# Sprint Multi-Checkpoint Monitoring Workflow\n\n## 📋 Overview\n\nThis automated workflow monitors your sprint progress and sends timely reports to Microsoft Teams at critical checkpoints throughout the two-week sprint cycle. It helps teams stay on track by identifying issues early and providing actionable insights.\n\nThe workflow automatically:\n- **Queries Azure DevOps** to get all work items in your current sprint\n- **Analyzes progress** based on which day of the sprint you're on\n- **Creates CSV reports** with filtered data for different categories\n- **Uploads reports to Azure Blob Storage** with secure download links\n- **Sends formatted messages to Teams** with summaries and file links\n\nBest Part: It's completely hands-off! Once configured, it runs automatically Monday through Friday at 8 AM.\n\n📅 The Four Sprint Checkpoints***\n**Day 2: Sprint Kickoff Inventory (Tuesday, Week 1)**\n      **What it checks**:\n      Planning Live items that are still in \"New\" or \"Approved\" status\n      DEV Only items that are still in \"New\" or \"Approved\" status\n**Day 5: Status Progress Check (Friday, Week 1)**\n      **What it checks**:\n       Planning Live items that are NOT in \"Testing\", \"Done\", or \"Closed\" status\n       Progress percentage toward testing phase\n**Days 6-8: Testing Assignment Check (Monday-Wednesday, Week 2)**\n       **What it checks**:\n       Planning Live items that are NOT in \"Testing\", \"Done\", or \"Ready for LIve\" status\n       Progress percentage toward testing phase\n**Day 9: Final Risk Assessment (Thursday, Week 2)**\n       **What it checks**:\n       Planning Live items STILL not in \"Testing\", \"Done\", or \"Ready for LIve\" status\n       These are flagged as HIGH RISK items",
+        "height": 1104,
+        "width": 2928
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -496,
+        -1472
+      ],
+      "typeVersion": 1,
+      "id": "c5f8af96-84da-4eb5-b200-16401f2cae1e",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "organization",
+              "value": "fefundinfo"
+            },
+            {
+              "name": "teamProject",
+              "value": "Precision Plus"
+            },
+            {
+              "name": "sprintNumber",
+              "value": "187"
+            },
+            {
+              "name": "releaseVersion",
+              "value": "4.76.0"
+            },
+            {
+              "name": "iterationPath",
+              "value": "Precision Plus\\\\Sprint 187"
+            },
+            {
+              "name": "azureStorageAccount",
+              "value": "pplusautomationresult"
+            },
+            {
+              "name": "azureStorageKey",
+              "value": "dPU5hJdS5LvLF4Q1BfO+PQRkohnNpcpwawz8c0UGG6d2qmemlnXzPSwovvU6DUqKR/+KqmjBm9qohnNjIMldig=="
+            },
+            {
+              "name": "azureContainer",
+              "value": "sprint-reports"
+            },
+            {
+              "name": "teamsWorkflowUrl",
+              "value": "https://default82f41f1bd00f4f7ba740e0fd8515f2.72.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/881340aaf72547c8b2407003fbe75cd7/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=S6w9exFWDWNQl_gZAcDB_h5K7Eq0-VarnVIvj4of_ms"
+            },
+            {
+              "name": "sprintStartDate",
+              "value": "2026-01-26"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set Sprint Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -640
+      ],
+      "id": "a55031e7-87be-461a-97e4-fbf240dc08c1",
+      "notes": "UPDATE EVERY SPRINT:\n- sprintNumber\n- releaseVersion\n- iterationPath\n\nAZURE BLOB CONFIG:\n- azureStorageAccount: Your storage account name\n- azureStorageKey: Your storage account access key\n- azureContainer: Container name (e.g., 'sprint-reports')"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://fe-tfs.visualstudio.com/Precision%20Plus/_apis/wit/wiql?api-version=7.0",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query\": \"SELECT [System.Id], [System.WorkItemType], [System.Title], [System.State], [System.Tags], [System.AssignedTo] FROM WorkItems WHERE [System.TeamProject] = 'Precision Plus' AND [System.IterationPath] = '{{ $json.iterationPath }}' AND [System.WorkItemType] <> 'Task' AND ([System.WorkItemType] = 'Product Backlog Item' OR [System.WorkItemType] = 'Bug' OR [System.WorkItemType] = 'Support') ORDER BY [System.WorkItemType], [System.Id]\"\n}",
+        "options": {}
+      },
+      "name": "Query Sprint PBIs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        240,
+        -640
+      ],
+      "id": "ae86690e-de60-40e4-bb8b-d9cc6a54a5f2",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "n0WqaasbuBjHcrAl",
+          "name": "AzureDevOps_PATToken"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $json.workItems.map(wi => ({\n  json: wi\n}));\nreturn items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        -640
+      ],
+      "id": "75077c2f-d9a9-446c-b088-34e1cde4bb3a",
+      "name": "Extract Work Item IDs"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        656,
+        -640
+      ],
+      "id": "fcba091f-3abb-4fbb-9e56-a269697a29fa",
+      "name": "Get Work Item Details",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "n0WqaasbuBjHcrAl",
+          "name": "AzureDevOps_PATToken"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// === Create CSV Files - Multi Checkpoint (With Zero-Issue Handling) ===\nconst data = $json;\n\n// Helper function to escape CSV fields\nfunction escapeCSV(value) {\n  if (value === null || value === undefined) return '';\n  const str = String(value);\n  if (str.includes(',') || str.includes('\"') || str.includes('\\n')) {\n    return '\"' + str.replace(/\"/g, '\"\"') + '\"';\n  }\n  return str;\n}\n\n// Helper function to convert array to CSV\nfunction arrayToCSV(items, headers) {\n  if (items.length === 0) return headers.join(',') + '\\n';\n  \n  const rows = [headers.join(',')];\n  for (const item of items) {\n    const row = headers.map(header => escapeCSV(item[header]));\n    rows.push(row.join(','));\n  }\n  return rows.join('\\n');\n}\n\n// Base metadata for all files\nconst baseMetadata = {\n  sprintNumber: data.sprintNumber,\n  releaseVersion: data.releaseVersion,\n  checkType: data.checkType,\n  sprintDay: data.sprintDay,\n  byState: data.byState,\n  planningLiveByState: data.planningLiveByState,\n  planningLiveCount: data.planningLiveCount,\n  devOnlyCount: data.devOnlyCount,\n  supportCount: data.supportCount,\n  needingUpdateCount: data.needingUpdateCount,\n  totalCount: data.totalCount\n};\n\nlet files = [];\n\nconsole.log(`📝 Creating CSV files for ${data.checkType}...`);\n\n// ========================================\n// DAY 2: Full inventory files\n// ========================================\nif (data.checkType === 'DAY2_INVENTORY') {\n  const headers = ['ID', 'Title', 'State', 'AssignedTo', 'Tags', 'WorkItemType'];\n  \n  files = [\n    {\n      filename: `Sprint_${data.sprintNumber}_Day2_All_PBIs.csv`,\n      content: arrayToCSV(data.allPBIs, headers),\n      category: 'All PBIs',\n      count: data.totalCount,\n      description: 'Complete inventory of all PBIs, bugs, and support tickets',\n      ...baseMetadata\n    },\n    {\n      filename: `Sprint_${data.sprintNumber}_Day2_Planning_Live.csv`,\n      content: arrayToCSV(data.planningLive, headers),\n      category: 'Planning Live',\n      count: data.planningLiveCount,\n      description: 'Items tagged for Planning/Live deployment',\n      ...baseMetadata\n    },\n    {\n      filename: `Sprint_${data.sprintNumber}_Day2_DEV_Only.csv`,\n      content: arrayToCSV(data.devOnly, headers),\n      category: 'DEV Only',\n      count: data.devOnlyCount,\n      description: 'Development-only items',\n      ...baseMetadata\n    },\n    {\n      filename: `Sprint_${data.sprintNumber}_Day2_Support_Tickets.csv`,\n      content: arrayToCSV(data.supportTickets, headers),\n      category: 'Support Tickets',\n      count: data.supportCount,\n      description: 'Customer support items',\n      ...baseMetadata\n    },\n    {\n      filename: `Sprint_${data.sprintNumber}_Day2_Needing_Status_Update.csv`,\n      content: arrayToCSV(data.needingStatusUpdate, headers),\n      category: 'Needing Status Update',\n      count: data.needingUpdateCount,\n      description: 'Items still in New, Approved, or Ready for Live status',\n      ...baseMetadata\n    }\n  ];\n}\n\n// ========================================\n// DAY 5: Status progress check files\n// ALWAYS create files, even if empty (for reference)\n// ========================================\nif (data.checkType === 'DAY5_STATUS_CHECK') {\n  const headers = ['ID', 'Title', 'State', 'AssignedTo', 'Tags', 'WorkItemType', 'Issue'];\n  \n  // Always include reference file for Planning Live\n  files.push({\n    filename: `Sprint_${data.sprintNumber}_Day5_All_PlanningLive.csv`,\n    content: arrayToCSV(data.planningLive, ['ID', 'Title', 'State', 'AssignedTo', 'Tags', 'WorkItemType']),\n    category: 'All Planning Live Items',\n    count: data.planningLiveCount,\n    description: 'Reference: All Planning Live items',\n    ...baseMetadata,\n    day5IssuesCount: data.day5IssuesCount\n  });\n  \n  // Only create issue files if there are issues\n  if (data.day5IssuesPlanningLive && data.day5IssuesPlanningLive.length > 0) {\n    files.push({\n      filename: `Sprint_${data.sprintNumber}_Day5_PlanningLive_NOT_Started.csv`,\n      content: arrayToCSV(data.day5IssuesPlanningLive, headers),\n      category: 'Planning Live - Not Started',\n      count: data.day5IssuesPlanningLive.length,\n      description: '⚠️ Planning Live items still in New or Approved',\n      ...baseMetadata,\n      day5IssuesCount: data.day5IssuesCount\n    });\n  }\n  \n  if (data.day5IssuesDevOnly && data.day5IssuesDevOnly.length > 0) {\n    files.push({\n      filename: `Sprint_${data.sprintNumber}_Day5_DevOnly_NOT_Started.csv`,\n      content: arrayToCSV(data.day5IssuesDevOnly, headers),\n      category: 'DEV Only - Not Started',\n      count: data.day5IssuesDevOnly.length,\n      description: '⚠️ DEV Only items still in New or Approved',\n      ...baseMetadata,\n      day5IssuesCount: data.day5IssuesCount\n    });\n  }\n  \n  console.log(`Day 5: ${data.day5IssuesCount} issues found`);\n}\n\n// ========================================\n// DAY 6-8: Testing assignment check files\n// ALWAYS create files, even if empty (for reference)\n// ========================================\nif (data.checkType === 'DAY6_8_TESTING_CHECK') {\n  const headers = ['ID', 'Title', 'State', 'AssignedTo', 'Tags', 'WorkItemType', 'DaysSinceSprintStart', 'Issue'];\n  \n  // Always include reference file for Planning Live\n  files.push({\n    filename: `Sprint_${data.sprintNumber}_Day${data.sprintDay}_All_PlanningLive.csv`,\n    content: arrayToCSV(data.planningLive, ['ID', 'Title', 'State', 'AssignedTo', 'Tags', 'WorkItemType']),\n    category: 'All Planning Live Items',\n    count: data.planningLiveCount,\n    description: 'Reference: All Planning Live items',\n    ...baseMetadata,\n    notInTestingCount: data.notInTestingCount\n  });\n  \n  // Only create issue file if there are items not in testing\n  if (data.notInTesting && data.notInTesting.length > 0) {\n    files.push({\n      filename: `Sprint_${data.sprintNumber}_Day${data.sprintDay}_NOT_In_Testing.csv`,\n      content: arrayToCSV(data.notInTesting, headers),\n      category: 'Planning Live - Not Yet Testing',\n      count: data.notInTestingCount,\n      description: `⚠️ Planning Live items not yet in Testing (Day ${data.sprintDay})`,\n      ...baseMetadata,\n      notInTestingCount: data.notInTestingCount\n    });\n  }\n  \n  console.log(`Day ${data.sprintDay}: ${data.notInTestingCount} items not in testing`);\n}\n\n// ========================================\n// DAY 9: Risk assessment files\n// ALWAYS create files, even if empty (for reference)\n// ========================================\nif (data.checkType === 'DAY9_RISK_ASSESSMENT') {\n  const headers = ['ID', 'Title', 'State', 'AssignedTo', 'Tags', 'WorkItemType', 'RiskLevel', 'DaysRemaining', 'Issue', 'Recommendation'];\n  \n  // Always include reference file for Planning Live\n  files.push({\n    filename: `Sprint_${data.sprintNumber}_Day9_All_PlanningLive.csv`,\n    content: arrayToCSV(data.planningLive, ['ID', 'Title', 'State', 'AssignedTo', 'Tags', 'WorkItemType']),\n    category: 'All Planning Live Items',\n    count: data.planningLiveCount,\n    description: 'Reference: All Planning Live items',\n    ...baseMetadata,\n    riskItemsCount: data.riskItemsCount\n  });\n  \n  // Only create risk file if there are risk items\n  if (data.riskItems && data.riskItems.length > 0) {\n    files.push({\n      filename: `Sprint_${data.sprintNumber}_Day9_HIGH_RISK_Items.csv`,\n      content: arrayToCSV(data.riskItems, headers),\n      category: '🚨 HIGH RISK - Not Testing',\n      count: data.riskItemsCount,\n      description: '🚨 CRITICAL: Planning Live items STILL not in testing',\n      ...baseMetadata,\n      riskItemsCount: data.riskItemsCount\n    });\n  }\n  \n  console.log(`Day 9: ${data.riskItemsCount} high risk items`);\n}\n\nconsole.log(`✅ Created ${files.length} CSV files for ${data.checkType}`);\n\n// Return as separate items for parallel upload\nreturn files.map(file => ({ json: file }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1056,
+        -640
+      ],
+      "id": "16bedb47-cac1-42ac-9d4d-06091c779e19",
+      "name": "Create CSV Files",
+      "notes": "Pure JavaScript - No imports needed!"
+    },
+    {
+      "parameters": {
+        "jsCode": "// === Categorize PBIs with Multi-Checkpoint Support ===\n// This replaces your current \"Categorize PBIs (FIXED IDs)3\" node code\n\nconst sprintNumber = $('Set Sprint Config').first().json.sprintNumber;\nconst releaseVersion = $('Set Sprint Config').first().json.releaseVersion;\nconst checkType = $('Determine Check Type').first().json.checkType;\nconst sprintDay = $('Determine Check Type').first().json.sprintDay;\nconst items = $input.all();\n\n// Base arrays (same as before)\nconst allPBIs = [];\nconst planningLive = [];\nconst devOnly = [];\nconst supportTickets = [];\nconst needingStatusUpdate = [];\nconst invalidStatuses = [\"New\", \"Approved\", \"Ready for Live\"];\n\n// NEW: Day 5 specific arrays\nconst day5InvalidStatuses = [\"New\", \"Approved\",\"Planned\"];\nconst day5IssuesPlanningLive = [];\nconst day5IssuesDevOnly = [];\n\n// NEW: Day 6-8 specific arrays\nconst notInTesting = [];\nconst testingStatuses = [\"Testing\", \"Done\", \"Ready for Live\"];\n\n// NEW: Day 9 specific arrays\nconst riskItems = [];\n\nconsole.log(`🔍 Categorizing ${items.length} work items for ${checkType}...`);\n\n// Process each work item (same logic as before)\nfor (const inputItem of items) {\n  // FIXED: Get both the work item object and fields\n  const workItem = inputItem.json;\n  const fields = workItem.fields || workItem;\n  \n  // FIXED: Try multiple paths to get the ID\n  const itemId = workItem.id || fields[\"System.Id\"] || fields.id || \"\";\n  const tags = fields[\"System.Tags\"] || \"\";\n  const state = fields[\"System.State\"] || \"\";\n  const workItemType = fields[\"System.WorkItemType\"] || \"\";\n  \n  // Build PBI data object with CORRECT ID\n  const pbiData = {\n    ID: String(itemId),\n    Title: fields[\"System.Title\"] || \"\",\n    State: state,\n    AssignedTo: fields[\"System.AssignedTo\"]?.displayName || \n                fields[\"System.AssignedTo\"]?.name || \n                \"Unassigned\",\n    Tags: tags,\n    WorkItemType: workItemType\n  };\n  \n  // Add to all PBIs (same as before)\n  allPBIs.push(pbiData);\n  \n  // Check if Planning Live or DEV Only\n  const isPlanningLive = tags.includes(\"Planning Live\");\n  const isDevOnly = tags.includes(\"DEV Only\");\n  \n  // Categorize by tags (same as before)\n  if (isPlanningLive) {\n    planningLive.push(pbiData);\n  } else if (isDevOnly) {\n    devOnly.push(pbiData);\n  }\n  \n  // Support tickets (same as before, but also check for Bug)\n  if (workItemType === \"Support\" || workItemType === \"Bug\") {\n    supportTickets.push(pbiData);\n  }\n  \n  // ========================================\n  // DAY 2: Basic status check (same as before)\n  // ========================================\n  if (checkType === 'DAY2_INVENTORY') {\n    if (invalidStatuses.includes(state)) {\n      needingStatusUpdate.push(pbiData);\n    }\n  }\n  \n  // ========================================\n  // NEW: DAY 5 - Check items are In Progress\n  // ========================================\n  if (checkType === 'DAY5_STATUS_CHECK') {\n    if (isPlanningLive && day5InvalidStatuses.includes(state)) {\n      day5IssuesPlanningLive.push({\n        ...pbiData,\n        Issue: `Should be In Progress by Day 5, currently: ${state}`\n      });\n    }\n    if (isDevOnly && day5InvalidStatuses.includes(state)) {\n      day5IssuesDevOnly.push({\n        ...pbiData,\n        Issue: `Should be In Progress by Day 5, currently: ${state}`\n      });\n    }\n  }\n  \n  // ========================================\n  // NEW: DAY 6-8 - Check Planning Live items are in Testing\n  // ========================================\n  if (checkType === 'DAY6_8_TESTING_CHECK') {\n    if (isPlanningLive && !testingStatuses.includes(state)) {\n      notInTesting.push({\n        ...pbiData,\n        DaysSinceSprintStart: sprintDay,\n        Issue: `Should be in Testing by Day ${sprintDay}, currently: ${state}`\n      });\n    }\n  }\n  \n  // ========================================\n  // NEW: DAY 9 - Flag Planning Live items STILL not in Testing as RISK\n  // ========================================\n  if (checkType === 'DAY9_RISK_ASSESSMENT') {\n    if (isPlanningLive && !testingStatuses.includes(state)) {\n      riskItems.push({\n        ...pbiData,\n        RiskLevel: 'HIGH',\n        DaysRemaining: 10 - sprintDay,\n        Issue: `CRITICAL: Not in Testing by Day 9, currently: ${state}`,\n        Recommendation: state === 'New' || state === 'Approved' \n          ? 'Consider moving to next sprint' \n          : 'Escalate immediately - likely will not complete'\n      });\n    }\n  }\n}\n\n// Calculate status breakdown (same as before)\nconst byState = {};\nfor (const item of allPBIs) {\n  const state = item.State || \"Unknown\";\n  byState[state] = (byState[state] || 0) + 1;\n}\n\n// NEW: Calculate Planning Live status breakdown\nconst planningLiveByState = {};\nfor (const item of planningLive) {\n  const state = item.State || \"Unknown\";\n  planningLiveByState[state] = (planningLiveByState[state] || 0) + 1;\n}\n\n// Log results\nconsole.log(`✅ Total PBIs: ${allPBIs.length}`);\nconsole.log(`🟩 Planning Live: ${planningLive.length}`);\nconsole.log(`🟣 DEV Only: ${devOnly.length}`);\n\nif (checkType === 'DAY5_STATUS_CHECK') {\n  console.log(`⚠️ Day 5 Issues: ${day5IssuesPlanningLive.length + day5IssuesDevOnly.length}`);\n}\nif (checkType === 'DAY6_8_TESTING_CHECK') {\n  console.log(`🧪 Not in Testing: ${notInTesting.length}`);\n}\nif (checkType === 'DAY9_RISK_ASSESSMENT') {\n  console.log(`🚨 Risk Items: ${riskItems.length}`);\n}\n\n// Return with all data (backwards compatible + new fields)\nreturn [{\n  json: {\n    sprintNumber,\n    releaseVersion,\n    checkType,          // NEW\n    sprintDay,          // NEW\n    \n    // Original fields (unchanged)\n    allPBIs,\n    planningLive,\n    devOnly,\n    supportTickets,\n    needingStatusUpdate,\n    byState,\n    \n    // NEW: Planning Live specific breakdown\n    planningLiveByState,\n    \n    // NEW: Day 5 specific\n    day5IssuesPlanningLive,\n    day5IssuesDevOnly,\n    day5IssuesCount: day5IssuesPlanningLive.length + day5IssuesDevOnly.length,\n    \n    // NEW: Day 6-8 specific\n    notInTesting,\n    notInTestingCount: notInTesting.length,\n    \n    // NEW: Day 9 specific\n    riskItems,\n    riskItemsCount: riskItems.length,\n    \n    // Original counts (unchanged)\n    totalCount: allPBIs.length,\n    planningLiveCount: planningLive.length,\n    devOnlyCount: devOnly.length,\n    supportCount: supportTickets.length,\n    needingUpdateCount: needingStatusUpdate.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        848,
+        -640
+      ],
+      "id": "ecdff564-c440-4626-9dfb-e25450228018",
+      "name": "Categorize PBIs Multi-Checkpoint"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get config from Set node\nconst config = $json;\n\n// Calculate current sprint day\nconst today = new Date();\nconst sprintStart = new Date(config.sprintStartDate);\nconst daysDiff = Math.floor((today - sprintStart) / (1000 * 60 * 60 * 24));\nconst sprintDay = daysDiff + 1;\n\n// Get day of week\nconst daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];\nconst dayOfWeek = daysOfWeek[today.getDay()];\n\nconsole.log(`📅 Today: ${today.toISOString().split('T')[0]} (${dayOfWeek})`);\nconsole.log(`🏃 Sprint Day: ${sprintDay}`);\nconsole.log(`📆 Sprint Start: ${config.sprintStartDate}`);\n\n// Determine check type\nlet checkType = '';\nlet checkDescription = '';\nlet shouldRun = true;\n\nif (sprintDay === 2) {\n  checkType = 'DAY2_INVENTORY';\n  checkDescription = 'Sprint Kickoff - Day 2 Full Inventory';\n} else if (sprintDay === 5) {\n  checkType = 'DAY5_STATUS_CHECK';\n  checkDescription = 'Day 5 - Status Progress Validation';\n} else if (sprintDay >= 6 && sprintDay <= 8) {\n  checkType = 'DAY6_8_TESTING_CHECK';\n  checkDescription = `Day ${sprintDay} - Testing Assignment Verification`;\n} else if (sprintDay === 9) {\n  checkType = 'DAY9_RISK_ASSESSMENT';\n  checkDescription = 'Day 9 - Final Risk Assessment';\n} else {\n  checkType = 'SKIP';\n  checkDescription = `Day ${sprintDay} - No scheduled check`;\n  shouldRun = false;\n}\n\nconsole.log(`✅ Check Type: ${checkType}`);\nconsole.log(`📝 Description: ${checkDescription}`);\n\nif (!shouldRun) {\n  console.log(`⏭️ Skipping - no check scheduled for day ${sprintDay}`);\n}\n\n// Return everything\nreturn [{\n  json: {\n    ...config,\n    sprintDay: sprintDay,\n    today: today.toISOString().split('T')[0],\n    dayOfWeek: dayOfWeek,\n    sprintWeek: sprintDay <= 5 ? 1 : 2,\n    checkType: checkType,\n    checkDescription: checkDescription,\n    shouldRun: shouldRun\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        -640
+      ],
+      "id": "a5326e4f-cede-4f02-afdd-06472efaf900",
+      "name": "Determine Check Type"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Upload to Azure Blob & Generate SAS URL": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monday 8 AM Every 2 Weeks4": {
+      "main": [
+        [
+          {
+            "node": "Set Sprint Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Teams Message2": {
+      "main": [
+        [
+          {
+            "node": "Send to Teams via Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Generate Teams Message2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Sprint Config": {
+      "main": [
+        [
+          {
+            "node": "Determine Check Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Sprint PBIs": {
+      "main": [
+        [
+          {
+            "node": "Extract Work Item IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Work Item IDs": {
+      "main": [
+        [
+          {
+            "node": "Get Work Item Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Work Item Details": {
+      "main": [
+        [
+          {
+            "node": "Categorize PBIs Multi-Checkpoint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create CSV Files": {
+      "main": [
+        [
+          {
+            "node": "Upload to Azure Blob & Generate SAS URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Categorize PBIs Multi-Checkpoint": {
+      "main": [
+        [
+          {
+            "node": "Create CSV Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Determine Check Type": {
+      "main": [
+        [
+          {
+            "node": "Query Sprint PBIs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "26d69a66-66a3-4a72-a4f3-ae85565ef574",
+  "meta": {
+    "instanceId": "857ccbc685255d737a652c5892ef034718a3f0ab3053f36de5f8fed84a5c2ef2"
+  },
+  "id": "ZvW8RW8yAkSFYCM1",
+  "tags": []
+}
