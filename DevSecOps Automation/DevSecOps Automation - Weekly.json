@@ -1,0 +1,974 @@
+{
+  "name": "DevSecOps Automation - Weekly",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        46736,
+        35896
+      ],
+      "id": "fbdf40db-e2b7-4582-a69d-239159800e23",
+      "name": "Weekly Security Scan"
+    },
+    {
+      "parameters": {
+        "content": "## DevSecOps Automation Workflow\nPurpose: Automatically syncs GitHub security alerts to Azure DevOps PBIs for tracking and remediation.\n\n**How it works:**\nWeekly execution (Mondays 9am) for the alerts created in the last 7days\nScans configured GitHub repositories for critical/high severity security alerts (Code Scanning, Dependabot, Secret Scanning)\nGroups alerts by vulnerability type\nUses AI to intelligently create new PBIs or update existing ones\nPrevents duplicate alert URLs - only adds new occurrences to existing PBIs\nLinks all PBIs to parent security work item with proper categorization\nShare the report to Teams Channel with the PBI details in Excel if the PBI count >10 \n\n**Key Features:**\n\nAutomatic deduplication of vulnerabilities across repositories\nSmart URL tracking - won't add the same alert twice\nDetailed PBI descriptions with vulnerability details and clickable alert links\nMaintains history of when new alerts are detected",
+        "height": 1088,
+        "width": 4512,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        46592,
+        35376
+      ],
+      "id": "202984bc-f47d-4334-9494-49ec678bed2a",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "796963b6-9fba-4a7d-8105-1435640fe050",
+      "name": "Loop Over Items",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        48752,
+        35896
+      ],
+      "notes": "Processes 1 vulnerability at a time (change to 5 for batches)"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "all_results",
+        "options": {}
+      },
+      "id": "a044b3a7-5e83-4a4c-be83-2635fcc8e913",
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        49224,
+        36044
+      ],
+      "notes": "Collects all loop results automatically"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ JSON.stringify($json.vulnerability) }}",
+        "options": {
+          "systemMessage": "You are a DevSecOps automation assistant. Your job is to process a SINGLE GitHub security vulnerability and manage Azure DevOps Product Backlog Items (PBIs).\n\n## YOUR WORKFLOW:\n\n1. **Understand the Input Data**\n   - You will receive ONE vulnerability object with:\n     * type: Alert type (Dependabot, Secret Scanning, or Code Scanning)\n     * vulnerability_title: The vulnerability identifier\n     * vulnerability_details: Description of the vulnerability\n     * alert_urls: Array of GitHub alert URLs for this vulnerability\n     * severity: Severity level\n     * count: Number of alerts for this vulnerability\n\n2. **Process This Single Vulnerability:**\n   \n   **Step A: Search for Existing PBI**\n   - Call \"Search PBI by Vulnerability Title\" tool\n   - Pass the vulnerability_title from the input\n   - Check if workItems array is empty or has items\n   \n   **Step B: Create OR Update Based on Search Results**\n   \n   - IF workItems array is EMPTY (no existing PBI):\n     * Call \"Create New Security PBI\" tool with:\n       - vulnerability_title\n       - vulnerability_details\n       - alert_urls formatted as HTML list: '<ul><li><a href=\"URL1\">Alert #1</a></li>...</ul>'\n     * Return result with: { action: \"created\", pbi_id: <id>, title: <title> }\n   \n   - IF workItems array HAS ITEMS (existing PBI found):\n     * Get pbi_id from first item in workItems array\n     * Call \"Get PBI Details\" tool with pbi_id to retrieve current description\n     * Extract existing alert URLs from the description HTML\n     * Compare input alert_urls against existing URLs\n     * Identify NEW URLs (not already in description)\n     * IF there are new URLs:\n       - Format new URLs as HTML list\n       - Call \"Update Security PBI\" tool with:\n         * pbi_id\n         * existing_description (from Get PBI Details)\n         * new_alert_urls (formatted HTML list of NEW URLs only)\n       - Return result with: { action: \"updated\", pbi_id: <id>, title: <title>, new_urls_added: <count> }\n     * IF no new URLs:\n       - Return result with: { action: \"skipped\", pbi_id: <id>, title: <title>, reason: \"All URLs already exist\" }\n\n3. **Return Result**\n   You MUST return a JSON object with these fields:\n   - action: \"created\" | \"updated\" | \"skipped\"\n   - pbi_id: The Azure DevOps PBI ID number\n   - title: The vulnerability title\n   - new_urls_added: (for updates) Number of new URLs added\n   - reason: (for skipped) Why it was skipped\n\n## IMPORTANT RULES:\n- Process ONLY ONE vulnerability per execution\n- ALWAYS call Search PBI first before any other action\n- DO NOT call Get PBI Details if search returns empty workItems - go straight to Create\n- ALWAYS call Get PBI Details before Update to get current description\n- Compare URLs carefully - only add truly NEW URLs not already in description\n- Format all alert URLs as proper HTML unordered lists with anchor tags\n- Use exact tool names: \"Search PBI by Vulnerability Title\", \"Get PBI Details\", \"Create New Security PBI\", \"Update Security PBI\"\n- Return a clear JSON response with action taken",
+          "returnIntermediateSteps": true
+        }
+      },
+      "id": "e7bbf04f-5359-4bf1-ae0e-25b1e5fccc24",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [
+        49160,
+        35644
+      ],
+      "notes": "Processes ONE vulnerability at a time"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        48976,
+        35868
+      ],
+      "id": "c96f9346-52e4-4895-8db6-e88121204d56",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "L6ctMkvByaGpC7gC",
+          "name": "OpenAi account 2"
+        }
+      },
+      "notes": "GPT-4o language model"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Creates a new Product Backlog Item for a security vulnerability in Azure DevOps. Input: vulnerability_title (string), vulnerability_details (string), alert_urls (string - HTML formatted list). Returns: Created PBI object with id and other fields.",
+        "method": "POST",
+        "url": "https://fe-tfs.visualstudio.com/Precision%20Plus/_apis/wit/workitems/$Product Backlog Item?api-version=7.0",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json-patch+json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "=[\n  { \"op\": \"add\", \"path\": \"/fields/System.Title\", \"value\": {{ $fromAI(\"vulnerability_title\").toJsonString() }} },\n  { \"op\": \"add\", \"path\": \"/fields/System.Description\", \"value\": {{ (\"<p><strong>Purpose:</strong> This PBI tracks security vulnerabilities identified in our repositories that require remediation to maintain code security and compliance.</p><p><strong>Vulnerability Details:</strong></p><p>\" + $fromAI(\"vulnerability_details\") + \"</p><p><strong>Affected Alert URLs:</strong></p>\" + $fromAI(\"alert_urls\")).toJsonString() }} },\n  { \"op\": \"add\", \"path\": \"/fields/Microsoft.VSTS.Common.AcceptanceCriteria\", \"value\": {{ (\"<p><strong>Purpose:</strong> This PBI tracks security vulnerabilities identified in our repositories that require remediation to maintain code security and compliance.</p><p><strong>Vulnerability Details:</strong></p><p>\" + $fromAI(\"vulnerability_details\") + \"</p><p><strong>Affected Alert URLs:</strong></p>\" + $fromAI(\"alert_urls\")).toJsonString() }} },\n  { \"op\": \"add\", \"path\": \"/fields/Custom.ProductCategory\", \"value\": \"Documents\" },\n  { \"op\": \"add\", \"path\": \"/fields/Custom.EffortTypePrecisionPlus\", \"value\": \"Security Enhancements\" },\n  { \"op\": \"add\", \"path\": \"/relations/-\", \"value\": { \"rel\": \"System.LinkTypes.Hierarchy-Reverse\", \"url\": \"https://fe-tfs.visualstudio.com/Precision%20Plus/_apis/wit/workitems/528765\" } }\n]",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.3,
+      "position": [
+        49104,
+        35868
+      ],
+      "id": "f4fd865c-32c8-43d3-8d55-215f68abc860",
+      "name": "create_new_pbi",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "n0WqaasbuBjHcrAl",
+          "name": "AzureDevOps_PATToken"
+        }
+      },
+      "notes": "Tool: Creates new PBI"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Searches for existing Azure DevOps PBIs matching a vulnerability title. Input: vulnerability_title (string). Returns: Array of matching work items with id and title, or empty array if none found.",
+        "method": "POST",
+        "url": "https://fe-tfs.visualstudio.com/Precision%20Plus/_apis/wit/wiql?api-version=7.0",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  query: \"Select [System.Id], [System.Title] From WorkItems Where [System.WorkItemType] = 'Product Backlog Item' And [System.Parent] = 528765 AND [System.Title] = '\" + $fromAI('vulnerability_title').replace(/'/g, \"''\") + \"' AND [System.TeamProject] = 'Precision Plus'\"\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.3,
+      "position": [
+        49232,
+        35868
+      ],
+      "id": "79d068bf-5b42-4631-9850-bc24cbf7f339",
+      "name": "search_for_existing_pbi",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "n0WqaasbuBjHcrAl",
+          "name": "AzureDevOps_PATToken"
+        }
+      },
+      "notes": "Tool: Searches for existing PBI"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Updates an existing Azure DevOps PBI by appending new alert URLs to the description. Input: pbi_id (number from search results), new_alert_urls (string - HTML formatted list of NEW alert URLs only), existing_description (string - current description content from Get PBI Details tool). Returns: Updated PBI object.",
+        "method": "PATCH",
+        "url": "=https://fe-tfs.visualstudio.com/Precision%20Plus/_apis/wit/workitems/{{ $fromAI('pbi_id') }}?api-version=7.0",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json-patch+json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "=[\n  {\n    \"op\": \"replace\",\n    \"path\": \"/fields/System.Description\",\n    \"value\": {{ ($fromAI(\"existing_description\") + \"<p><strong>New Alerts Added:</strong></p>\" + $fromAI(\"new_alert_urls\")).toJsonString() }}\n  },\n  {\n    \"op\": \"add\",\n    \"path\": \"/fields/System.History\",\n    \"value\": {{ (\"New vulnerability occurrences detected and added to description: \" + $fromAI(\"new_alert_urls\")).toJsonString() }}\n  }\n]",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.3,
+      "position": [
+        49360,
+        35868
+      ],
+      "id": "e268b418-4785-4710-a9f8-688a850da65e",
+      "name": "update_existing_pbi",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "n0WqaasbuBjHcrAl",
+          "name": "AzureDevOps_PATToken"
+        }
+      },
+      "notes": "Tool: Updates existing PBI"
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "repos",
+              "value": "={{ [\"Precision-Plus-Infra_PrecisionPlus_Tools\",\"Precision-Plus-KiiHub\",\"Precision-Plus-CommonServices\",\"Precision-Plus-yoursri.content\",\"Precision-Plus-CoreDocumentsAPI.Internal\",\"Precision-Plus-PlusDocuments\",\"Precision-Plus-PlusDocumentsApps\",\"Precision-Plus-CoreDocumentsAPI\",\"Precision-Plus-AMS-FSW-Module\",\"Precision-Plus-CalculationEngine\",\"Precision-Plus-CalculationEngineeTool\",\"Precision-Plus-FactsheetPlatform\"] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Repo List",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        47184,
+        35896
+      ],
+      "id": "661ef0af-340c-4fff-ae06-0bdc5328150e",
+      "notes": "List of repositories to scan"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "name": "Combine All Alerts",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        48080,
+        35880
+      ],
+      "id": "1f0cf5a1-db4d-4ba1-a341-810c072e00c4",
+      "notes": "Combines all alerts from all sources"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/fefundinfo-internal/{{$json.repos}}/code-scanning/alerts?state=open&severity=critical&severity=high&created=>={{$now.minus(7,\"days\").toISO()}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "name": "Get Code Scanning",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        47632,
+        35752
+      ],
+      "id": "e619f14f-06e5-4dde-808b-fdcbcebefee9",
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "sJKVQMBeu5eNfJc4",
+          "name": "GitHub PAT Token"
+        }
+      },
+      "notes": "Fetches Code Scanning alerts"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/fefundinfo-internal/{{$json.repos}}/dependabot/alerts?state=open&severity=critical,high&created=>={{$now.minus(7,\"days\").toISO()}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "name": "Get Dependabot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        47632,
+        35944
+      ],
+      "id": "29fcc135-a0fc-467b-91c6-632fee343ac0",
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "sJKVQMBeu5eNfJc4",
+          "name": "GitHub PAT Token"
+        }
+      },
+      "notes": "Fetches Dependabot alerts"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/fefundinfo-internal/{{$json.repos}}/secret-scanning/alerts?state=open&severity=critical&severity=high&created=>={{$now.minus(7,\"days\").toISO()}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "name": "Get Secret Scanning",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        47632,
+        36136
+      ],
+      "id": "22b60fe9-e8d0-4c6b-9553-2288c49d0973",
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "sJKVQMBeu5eNfJc4",
+          "name": "GitHub PAT Token"
+        }
+      },
+      "notes": "Fetches Secret Scanning alerts"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "repos",
+        "options": {}
+      },
+      "name": "Split Repos",
+      "type": "n8n-nodes-base.itemLists",
+      "typeVersion": 1,
+      "position": [
+        47408,
+        35896
+      ],
+      "id": "ab6ebe72-5f08-49f2-af5e-da3b9ba13c05"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "all_alerts",
+        "options": {}
+      },
+      "name": "Aggregate All Alerts",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        48304,
+        35896
+      ],
+      "id": "03019897-41f8-4c50-b50e-969268d2c08d",
+      "notes": "Bundles all alerts into single item"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Retrieves full details of an existing Azure DevOps PBI including description field. Input: pbi_id (number). Returns: Complete PBI object with all fields including System.Description.",
+        "url": "=https://fe-tfs.visualstudio.com/Precision%20Plus/_apis/wit/workitems/{{ $fromAI('pbi_id') }}?api-version=7.0",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {}
+      },
+      "id": "72775634-110a-4165-adf8-b79215cf3b85",
+      "name": "get_pbi_details",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.3,
+      "position": [
+        49488,
+        35868
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "n0WqaasbuBjHcrAl",
+          "name": "AzureDevOps_PATToken"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nif (!items || items.length === 0) {\n  return [];\n}\n\nconst allAlerts = items[0].json.all_alerts || [];\n\n// Group by scan type + title\nconst grouped = {};\n\nfor (const alert of allAlerts) {\n  const key = `${alert.scan_type}:${alert.title}`;\n  \n  if (!grouped[key]) {\n    grouped[key] = {\n      type: alert.scan_type,\n      vulnerability_title: alert.title,\n      vulnerability_details: alert.description,\n      severity: alert.severity,\n      repository: alert.repository,\n      alert_urls: [],\n      count: 0\n    };\n  }\n  \n  if (alert.html_url && !grouped[key].alert_urls.includes(alert.html_url)) {\n    grouped[key].alert_urls.push(alert.html_url);\n    grouped[key].count++;\n  }\n}\n\nconst compressed = Object.values(grouped);\n\nconsole.log(`Compressed ${allAlerts.length} → ${compressed.length} vulnerabilities`);\n\nreturn compressed.map(alert => ({\n  json: {\n    vulnerability: alert,\n    repo: alert.repository,\n    type: alert.type\n  }\n}));"
+      },
+      "id": "c05827d2-07f7-4229-bf6a-e929688c4e0e",
+      "name": "Compress Alert Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48528,
+        35896
+      ],
+      "notes": "Prepares data for loop processing"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════════════\n// FORMAT ADAPTIVE CARD - FINAL FIX (With Correct Alert Counts)\n// ═══════════════════════════════════════════════════════════════════════\n\nconst inputData = $input.first().json;\nconst config = $('Set Sprint Config').first().json;\n\nconsole.log(`📊 Generating Teams card`);\n\n// ─────────────────────────────────────────────────────────────────────\n// 1. EXTRACT DATA FROM INPUT\n// ─────────────────────────────────────────────────────────────────────\n\nconst summary = inputData.summary || {};\nconst detailedData = inputData.detailedData || {};\nconst pbisList = inputData.pbis || [];\n\n// Summary metrics from Generate Report\nconst totalPBIsCreated = summary.created || 0;\nconst totalPBIsUpdated = summary.updated || 0;\nconst totalSkipped = summary.skipped || 0;\nconst totalPBIs = totalPBIsCreated + totalPBIsUpdated;\nconst totalRawAlerts = summary.total_raw_alerts || 0;  // 146\nconst totalUniqueVulns = summary.total_unique_vulnerabilities || 0;  // 41\n\nconsole.log(`📋 Summary: ${totalRawAlerts} raw alerts → ${totalUniqueVulns} unique vulnerabilities, ${totalPBIs} PBIs managed`);\n\n// ─────────────────────────────────────────────────────────────────────\n// 2. PROCESS REPOSITORY DATA\n// ─────────────────────────────────────────────────────────────────────\n\nconst repoStats = {};\n\nfor (const [repository, repoData] of Object.entries(detailedData)) {\n  if (!repoStats[repository]) {\n    repoStats[repository] = {\n      totalAlerts: 0,\n      codeScanningAlerts: 0,\n      dependabotAlerts: 0,\n      secretScanningAlerts: 0,\n      uniqueVulnerabilities: 0,\n      pbiCount: 0\n    };\n  }\n  \n  for (const [scanType, scanData] of Object.entries(repoData)) {\n    const alerts = scanData.totalAlerts || 0;\n    const uniques = scanData.uniqueVulnerabilities || 0;\n    const pbiList = scanData.pbiList || [];\n    \n    repoStats[repository].totalAlerts += alerts;\n    repoStats[repository].uniqueVulnerabilities += uniques;\n    repoStats[repository].pbiCount += pbiList.length;\n    \n    // Count by scan type\n    const scanTypeLower = scanType.toLowerCase();\n    if (scanTypeLower.includes('code')) {\n      repoStats[repository].codeScanningAlerts += alerts;\n    } else if (scanTypeLower.includes('dependabot')) {\n      repoStats[repository].dependabotAlerts += alerts;\n    } else if (scanTypeLower.includes('secret')) {\n      repoStats[repository].secretScanningAlerts += alerts;\n    }\n  }\n}\n\nconst reposScanned = Object.keys(repoStats).length;\nconst reposWithAlerts = Object.values(repoStats).filter(r => r.totalAlerts > 0).length;\n\nconsole.log(`📦 ${reposScanned} repos processed, ${reposWithAlerts} with alerts`);\n\n// ─────────────────────────────────────────────────────────────────────\n// 3. BUILD REPOSITORY CARDS\n// ─────────────────────────────────────────────────────────────────────\n\nconst repoCards = [];\n\nconst sortedRepos = Object.entries(repoStats)\n  .filter(([name, _]) => name !== 'Unknown')\n  .filter(([_, stats]) => stats.totalAlerts > 0)\n  .sort(([_, a], [__, b]) => b.totalAlerts - a.totalAlerts);\n\nfor (const [repoName, stats] of sortedRepos) {\n  let style = \"warning\";\n  if (stats.totalAlerts >= 10) {\n    style = \"attention\";\n  }\n  \n  repoCards.push({\n    \"type\": \"Container\",\n    \"style\": style,\n    \"spacing\": \"Small\",\n    \"items\": [\n      {\n        \"type\": \"ColumnSet\",\n        \"columns\": [\n          {\n            \"type\": \"Column\",\n            \"width\": \"stretch\",\n            \"items\": [\n              {\n                \"type\": \"TextBlock\",\n                \"text\": `**${repoName}**`,\n                \"weight\": \"Bolder\"\n              }\n            ]\n          },\n          {\n            \"type\": \"Column\",\n            \"width\": \"auto\",\n            \"items\": [\n              {\n                \"type\": \"TextBlock\",\n                \"text\": `🚨 ${stats.totalAlerts} alerts`\n              }\n            ]\n          }\n        ]\n      },\n      {\n        \"type\": \"TextBlock\",\n        \"text\": `Code: ${stats.codeScanningAlerts} • Dependabot: ${stats.dependabotAlerts} • Secrets: ${stats.secretScanningAlerts} → **${stats.pbiCount} PBIs**`,\n        \"size\": \"Small\",\n        \"spacing\": \"None\"\n      }\n    ]\n  });\n}\n\n// ─────────────────────────────────────────────────────────────────────\n// 4. BUILD PBI SECTION\n// ─────────────────────────────────────────────────────────────────────\n\nlet pbiSection;\nlet additionalActions = [];\n\nif (totalPBIs === 0 && pbisList.length === 0) {\n  // NO NEW ALERTS - ALL CLEAR!\n  pbiSection = {\n    \"type\": \"Container\",\n    \"style\": \"good\",\n    \"separator\": true,\n    \"items\": [\n      {\n        \"type\": \"TextBlock\",\n        \"text\": \"✅ All Clear - No New Security Issues\",\n        \"weight\": \"Bolder\",\n        \"size\": \"Medium\",\n        \"color\": \"Good\"\n      },\n      {\n        \"type\": \"TextBlock\",\n        \"text\": `${totalRawAlerts} alerts were processed from GitHub (grouped into ${totalUniqueVulns} unique vulnerabilities), but no new issues were discovered this week.`,\n        \"wrap\": true\n      },\n      {\n        \"type\": \"TextBlock\",\n        \"text\": totalSkipped > 0 \n          ? `✓ ${totalSkipped} known vulnerabilities are already being tracked in existing PBIs.`\n          : \"✓ All security alerts from the past 7 days are already being tracked.\",\n        \"wrap\": true,\n        \"spacing\": \"Small\",\n        \"weight\": \"Bolder\",\n        \"color\": \"Good\"\n      },\n      {\n        \"type\": \"TextBlock\",\n        \"text\": \"🎉 Great job keeping on top of security issues!\",\n        \"wrap\": true,\n        \"spacing\": \"Small\",\n        \"isSubtle\": true\n      }\n    ]\n  };\n} else if (totalPBIs <= 10 && pbisList.length > 0) {\n  // INLINE PBI LIST\n  const pbiLinks = pbisList.slice(0, 10).map(pbi => \n    `[#${pbi.id}](${pbi.url})`\n  ).join(' • ');\n  \n  pbiSection = {\n    \"type\": \"Container\",\n    \"style\": \"emphasis\",\n    \"separator\": true,\n    \"items\": [\n      {\n        \"type\": \"TextBlock\",\n        \"text\": \"📋 Work Items\",\n        \"weight\": \"Bolder\",\n        \"size\": \"Medium\"\n      },\n      {\n        \"type\": \"TextBlock\",\n        \"text\": `${totalPBIs} PBIs were created or updated during this scan.`,\n        \"wrap\": true\n      },\n      {\n        \"type\": \"TextBlock\",\n        \"text\": \"**Click PBI numbers to open in Azure DevOps:**\",\n        \"spacing\": \"Small\"\n      },\n      {\n        \"type\": \"TextBlock\",\n        \"text\": pbiLinks,\n        \"wrap\": true\n      }\n    ]\n  };\n} else if (totalPBIs > 10 || pbisList.length > 10) {\n  // EXCEL DOWNLOAD\n  const excelUrl = inputData.excelUrl || inputData.downloadUrl || \"#\";\n  \n  pbiSection = {\n    \"type\": \"Container\",\n    \"style\": \"warning\",\n    \"separator\": true,\n    \"items\": [\n      {\n        \"type\": \"TextBlock\",\n        \"text\": \"📋 Work Items\",\n        \"weight\": \"Bolder\",\n        \"size\": \"Medium\"\n      },\n      {\n        \"type\": \"TextBlock\",\n        \"text\": `${totalPBIs} PBIs were created or updated during this scan.`,\n        \"wrap\": true\n      },\n      {\n        \"type\": \"TextBlock\",\n        \"text\": \"⚠️ **PBI count exceeds 10** - Full list exported to Excel\",\n        \"color\": \"Warning\",\n        \"weight\": \"Bolder\",\n        \"spacing\": \"Small\"\n      }\n    ]\n  };\n  \n  additionalActions.push({\n    \"type\": \"Action.OpenUrl\",\n    \"title\": \"📥 Download PBI List (Excel)\",\n    \"url\": excelUrl,\n    \"style\": \"positive\"\n  });\n}\n\n// ─────────────────────────────────────────────────────────────────────\n// 5. BUILD ADAPTIVE CARD\n// ─────────────────────────────────────────────────────────────────────\n\nconst now = new Date();\nconst formattedDate = now.toLocaleDateString('en-US', { \n  year: 'numeric', \n  month: 'long', \n  day: 'numeric' \n});\nconst formattedTime = now.toLocaleTimeString('en-US', { \n  hour: '2-digit', \n  minute: '2-digit',\n  hour12: true \n});\n\nconst parentFeatureUrl = config.parentFeatureUrl || \n  `https://dev.azure.com/${config.organization}/${encodeURIComponent(config.teamProject)}/_workitems`;\n\n// Determine card tone\nconst hasNewIssues = totalPBIs > 0;\nconst cardTitle = hasNewIssues \n  ? \"🔒 Weekly Security Scan\" \n  : \"✅ Weekly Security Scan - All Clear\";\nconst headerColor = hasNewIssues ? \"Accent\" : \"Good\";\n\nconst adaptiveCard = {\n  \"type\": \"AdaptiveCard\",\n  \"$schema\": \"http://adaptivecards.io/schemas/adaptive-card.json\",\n  \"version\": \"1.4\",\n  \"body\": [\n    {\n      \"type\": \"Container\",\n      \"style\": \"emphasis\",\n      \"items\": [\n        {\n          \"type\": \"TextBlock\",\n          \"text\": cardTitle,\n          \"weight\": \"Bolder\",\n          \"size\": \"ExtraLarge\",\n          \"color\": headerColor\n        },\n        {\n          \"type\": \"TextBlock\",\n          \"text\": `${formattedDate} • ${formattedTime}`,\n          \"isSubtle\": true,\n          \"spacing\": \"None\"\n        }\n      ]\n    },\n    {\n      \"type\": \"Container\",\n      \"separator\": true,\n      \"items\": [\n        {\n          \"type\": \"TextBlock\",\n          \"text\": \"📊 Executive Summary\",\n          \"weight\": \"Bolder\",\n          \"size\": \"Medium\"\n        },\n        {\n          \"type\": \"FactSet\",\n          \"facts\": [\n            {\n              \"title\": \"Repositories Scanned:\",\n              \"value\": `${reposScanned}`\n            },\n            {\n              \"title\": \"Repositories with Alerts:\",\n              \"value\": `${reposWithAlerts}`\n            },\n            {\n              \"title\": \"Total Alerts:\",\n              \"value\": `${totalRawAlerts}`\n            },\n            {\n              \"title\": \"Unique Vulnerabilities:\",\n              \"value\": `${totalUniqueVulns}`\n            },\n            {\n              \"title\": \"PBIs Created:\",\n              \"value\": `${totalPBIsCreated}`\n            },\n            {\n              \"title\": \"PBIs Updated:\",\n              \"value\": `${totalPBIsUpdated}`\n            },\n            {\n              \"title\": \"Total PBIs Managed:\",\n              \"value\": `**${totalPBIs}**`\n            }\n          ]\n        }\n      ]\n    },\n    \n    ...(repoCards.length > 0 ? [\n      {\n        \"type\": \"Container\",\n        \"separator\": true,\n        \"items\": [\n          {\n            \"type\": \"TextBlock\",\n            \"text\": \"🗂️ Repository Details\",\n            \"weight\": \"Bolder\",\n            \"size\": \"Medium\"\n          }\n        ]\n      },\n      ...repoCards\n    ] : []),\n    \n    pbiSection\n  ],\n  \n  \"actions\": [\n    ...additionalActions,\n    {\n      \"type\": \"Action.OpenUrl\",\n      \"title\": \"🔗 View Parent Feature/Epic\",\n      \"url\": parentFeatureUrl,\n      \"style\": totalPBIs > 0 ? \"positive\" : \"default\"\n    },\n    {\n      \"type\": \"Action.OpenUrl\",\n      \"title\": \"📊 Security Dashboard\",\n      \"url\": `https://dev.azure.com/${config.organization}/${encodeURIComponent(config.teamProject)}/_queries`\n    }\n  ]\n};\n\nconsole.log(`✅ Generated card with ${repoCards.length} repo sections`);\n\nreturn [{\n  json: {\n    type: \"message\",\n    attachments: [\n      {\n        contentType: \"application/vnd.microsoft.card.adaptive\",\n        content: adaptiveCard\n      }\n    ]\n  }\n}];"
+      },
+      "id": "d2762d20-9046-4df2-b2f2-dd5fe7759201",
+      "name": "Format Adaptive Card",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        50592,
+        36044
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://default82f41f1bd00f4f7ba740e0fd8515f2.72.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/30d7a20a7d29431cb12fbf71d9e031f8/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=7CR-QhpWtPUCkko_LFUl4VUFpmZXW3R7BEleQ6R9-AQ",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "cf643571-40cc-44bc-857a-68bab54a81a6",
+      "name": "Post to Teams",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        50816,
+        36044
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════════════\n// GENERATE REPORT - FIXED (Tracks Both Alerts and Unique Vulnerabilities)\n// ═══════════════════════════════════════════════════════════════════════\n\nconsole.log('=== Generate Report ===');\n\n// Get data from Aggregate Results node\nconst inputItem = $input.first().json;\nconst allResults = inputItem.all_results || [];\n\nconsole.log('Total results from Aggregate:', allResults.length);\n\n// ─────────────────────────────────────────────────────────────────────\n// 1. PROCESS RESULTS - TRACK BOTH ALERTS AND UNIQUE VULNERABILITIES\n// ─────────────────────────────────────────────────────────────────────\n\nconst detailedData = {};\nlet totalRawAlerts = 0;  // Total count from Aggregate All Alerts (146)\n\nfor (const result of allResults) {\n  // Extract data - handle multiple possible structures\n  const vuln = result.vulnerability || result;\n  const repo = vuln.repository || result.repository || result.repo || 'Unknown';\n  const scanType = vuln.type || result.type || result.scan_type || 'Unknown';\n  \n  // Initialize repository if needed\n  if (!detailedData[repo]) {\n    detailedData[repo] = {};\n  }\n  \n  // Initialize scan type if needed\n  if (!detailedData[repo][scanType]) {\n    detailedData[repo][scanType] = {\n      totalAlerts: 0,              // Raw alert count (before grouping)\n      uniqueVulnerabilities: 0,    // After grouping (1 per result)\n      pbisCreated: 0,\n      pbisUpdated: 0,\n      pbiList: []\n    };\n  }\n  \n  // Count raw alerts (this is the count from Compress Alert Data)\n  // Each result represents a unique vulnerability with N alerts grouped together\n  const alertCount = vuln.count || result.count || 1;\n  detailedData[repo][scanType].totalAlerts += alertCount;\n  totalRawAlerts += alertCount;\n  \n  // Count unique vulnerabilities (1 per result)\n  detailedData[repo][scanType].uniqueVulnerabilities += 1;\n  \n  // Track PBI actions\n  const action = result.action;\n  const pbiId = result.pbi_id;\n  \n  if (action === 'created' && pbiId) {\n    detailedData[repo][scanType].pbisCreated += 1;\n    \n    const exists = detailedData[repo][scanType].pbiList.find(p => p.id === pbiId);\n    if (!exists) {\n      detailedData[repo][scanType].pbiList.push({\n        id: pbiId,\n        title: vuln.vulnerability_title || result.title || 'Security Issue',\n        action: 'created',\n        repository: repo,\n        scanType: scanType,\n        alertCount: alertCount,\n        url: `https://dev.azure.com/fefundinfo/Precision%20Plus/_workitems/edit/${pbiId}`\n      });\n    }\n  } else if (action === 'updated' && pbiId) {\n    detailedData[repo][scanType].pbisUpdated += 1;\n    \n    const exists = detailedData[repo][scanType].pbiList.find(p => p.id === pbiId);\n    if (!exists) {\n      detailedData[repo][scanType].pbiList.push({\n        id: pbiId,\n        title: vuln.vulnerability_title || result.title || 'Security Issue',\n        action: 'updated',\n        repository: repo,\n        scanType: scanType,\n        alertCount: alertCount,\n        url: `https://dev.azure.com/fefundinfo/Precision%20Plus/_workitems/edit/${pbiId}`\n      });\n    }\n  }\n}\n\n// ─────────────────────────────────────────────────────────────────────\n// 2. BUILD SUMMARY\n// ─────────────────────────────────────────────────────────────────────\n\nconst summary = {\n  total_raw_alerts: totalRawAlerts,        // 146 (from Aggregate All Alerts)\n  total_unique_vulnerabilities: allResults.length,  // 41 (after compression)\n  total_processed: allResults.length,      // 41 unique vulnerabilities\n  created: allResults.filter(r => r.action === 'created').length,\n  updated: allResults.filter(r => r.action === 'updated').length,\n  skipped: allResults.filter(r => r.action === 'skipped').length\n};\n\nconsole.log('Summary:');\nconsole.log(`  - Raw alerts: ${summary.total_raw_alerts}`);\nconsole.log(`  - Unique vulnerabilities: ${summary.total_unique_vulnerabilities}`);\nconsole.log(`  - PBIs created: ${summary.created}`);\nconsole.log(`  - PBIs updated: ${summary.updated}`);\nconsole.log(`  - Skipped: ${summary.skipped}`);\n\n// ─────────────────────────────────────────────────────────────────────\n// 3. BUILD FLAT PBI LIST (for Excel and Teams card)\n// ─────────────────────────────────────────────────────────────────────\n\nconst allPBIs = [];\n\nfor (const repo of Object.values(detailedData)) {\n  for (const scanType of Object.values(repo)) {\n    for (const pbi of scanType.pbiList) {\n      // Avoid duplicates\n      if (!allPBIs.find(p => p.id === pbi.id)) {\n        allPBIs.push(pbi);\n      }\n    }\n  }\n}\n\nconsole.log(`Total unique PBIs: ${allPBIs.length}`);\n\n// ─────────────────────────────────────────────────────────────────────\n// 4. RETURN REPORT\n// ─────────────────────────────────────────────────────────────────────\n\nreturn [{\n  json: {\n    detailedData: detailedData,\n    summary: summary,\n    pbis: allPBIs,  // Flat list of all PBIs with full details\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "06a5327b-b9a0-407d-ad7a-aa51239d9072",
+      "name": "Generate Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        49696,
+        36044
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// Check if we have any items\nif (!items || items.length === 0) {\n  console.log('Filter Secret Scanning: No items to process');\n  return [];\n}\n\n// Filter out empty/invalid items\nconst validItems = items.filter(item => {\n  const alert = item.json;\n  return alert && \n         alert.secret_type_display_name && \n         alert.html_url &&\n         !alert.message;\n});\n\nif (validItems.length === 0) {\n  console.log('Filter Secret Scanning: No valid secret scanning alerts found');\n  return [];\n}\n\nconsole.log(`Filter Secret Scanning: Processing ${validItems.length} alerts`);\n\nreturn validItems.map(item => {\n  const alert = item.json;\n  \n  return {\n    json: {\n      scan_type: 'Secret Scanning',\n      title: alert.secret_type_display_name,\n      description: `**Secret Type:** ${alert.secret_type_display_name}\n**Secret:** ${alert.secret || 'Redacted'}\n**First Location:** ${alert.locations?.[0]?.details?.path || 'Unknown'}\n**Alert URL:** ${alert.html_url}`,\n      html_url: alert.html_url,\n      severity: 'high',\n      state: alert.state || 'open',\n      repository: extractRepo(alert.html_url)\n    }\n  };\n});\n\nfunction extractRepo(url) {\n  if (!url) return 'Unknown';\n  const match = url.match(/github\\.com\\/[^\\/]+\\/([^\\/]+)/);\n  return match ? match[1] : 'Unknown';\n}"
+      },
+      "id": "a5fccab5-d775-4ce7-892d-0f73341559be",
+      "name": "Filter Secret Scanning",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        47856,
+        36136
+      ],
+      "executeOnce": false,
+      "alwaysOutputData": true,
+      "notes": "Extracts required fields: secret_type_display_name, secret, html_url, path"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// Check if we have any items\nif (!items || items.length === 0) {\n  console.log('Filter Dependabot: No items to process');\n  return [];\n}\n\n// Filter out empty/invalid items\nconst validItems = items.filter(item => {\n  const alert = item.json;\n  return alert && \n         alert.security_advisory && \n         alert.security_advisory.summary &&\n         alert.html_url &&\n         !alert.message;\n});\n\nif (validItems.length === 0) {\n  console.log('Filter Dependabot: No valid dependabot alerts found');\n  return [];\n}\n\nconsole.log(`Filter Dependabot: Processing ${validItems.length} alerts`);\n\nreturn validItems.map(item => {\n  const alert = item.json;\n  \n  return {\n    json: {\n      scan_type: 'Dependabot',\n      title: alert.security_advisory.summary,\n      description: `**Summary:** ${alert.security_advisory.summary}\n**Description:** ${alert.security_advisory.description || 'N/A'}\n**Severity:** ${alert.security_advisory.severity || 'Unknown'}\n**CVE:** ${alert.security_advisory.cve_id || 'N/A'}\n**Package:** ${alert.security_vulnerability?.package?.name || 'N/A'}\n**Alert URL:** ${alert.html_url}`,\n      html_url: alert.html_url,\n      severity: alert.security_advisory.severity || 'unknown',\n      state: alert.state || 'open',\n      repository: extractRepo(alert.html_url)\n    }\n  };\n});\n\nfunction extractRepo(url) {\n  if (!url) return 'Unknown';\n  const match = url.match(/github\\.com\\/[^\\/]+\\/([^\\/]+)/);\n  return match ? match[1] : 'Unknown';\n}"
+      },
+      "id": "ba373955-fc53-4b9b-b169-62a2edc8dd4e",
+      "name": "Filter Dependabot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        47856,
+        35944
+      ],
+      "notes": "Extracts required fields: security_advisory.summary, html_url, description"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// Check if we have any items\nif (!items || items.length === 0) {\n  console.log('Filter Code Scanning: No items to process');\n  return [];\n}\n\n// Filter out empty/invalid items\nconst validItems = items.filter(item => {\n  const alert = item.json;\n  return alert && \n         alert.rule && \n         (alert.rule.description || alert.rule.id) &&\n         alert.html_url &&\n         !alert.message;\n});\n\nif (validItems.length === 0) {\n  console.log('Filter Code Scanning: No valid code scanning alerts found');\n  return [];\n}\n\nconsole.log(`Filter Code Scanning: Processing ${validItems.length} alerts`);\n\nreturn validItems.map(item => {\n  const alert = item.json;\n  \n  return {\n    json: {\n      scan_type: 'Code Scanning',\n      title: alert.rule.description || alert.rule.id,\n      description: `**Rule:** ${alert.rule.description || alert.rule.id}\n**Full Description:** ${alert.rule.full_description || alert.rule.help || 'N/A'}\n**Severity:** ${alert.rule.severity || 'Unknown'}\n**Tool:** ${alert.tool?.name || 'N/A'}\n**Location:** ${alert.most_recent_instance?.location?.path || 'N/A'}\n**Alert URL:** ${alert.html_url}`,\n      html_url: alert.html_url,\n      severity: alert.rule.severity || 'unknown',\n      state: alert.state || 'open',\n      repository: extractRepo(alert.html_url)\n    }\n  };\n});\n\nfunction extractRepo(url) {\n  if (!url) return 'Unknown';\n  const match = url.match(/github\\.com\\/[^\\/]+\\/([^\\/]+)/);\n  return match ? match[1] : 'Unknown';\n}"
+      },
+      "id": "176a29af-2d11-4cf8-82c4-b6eb72614208",
+      "name": "Filter Code Scanning",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        47856,
+        35752
+      ],
+      "notes": "Extracts required fields: rule.description, html_url, rule.full_description"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════════════════════════════\n// GENERATE EXCEL PBI LIST - FIXED (Works with Generate Report output)\n// ═══════════════════════════════════════════════════════════════════════\n\nconst inputData = $input.first().json;\nconst config = $('Set Sprint Config').first().json;\n\nconsole.log(`📊 Processing data for Excel export`);\n\n// ─────────────────────────────────────────────────────────────────────\n// 1. GET PBI LIST FROM GENERATE REPORT OUTPUT\n// ─────────────────────────────────────────────────────────────────────\n\n// The Generate Report node now returns a flat \"pbis\" array\nconst allPBIs = inputData.pbis || [];\nconst summary = inputData.summary || {};\n\nconst totalPBIsCreated = summary.created || 0;\nconst totalPBIsUpdated = summary.updated || 0;\nconst totalPBIs = totalPBIsCreated + totalPBIsUpdated;\n\nconsole.log(`📋 PBI Summary:`);\nconsole.log(`   - Total PBIs: ${allPBIs.length}`);\nconsole.log(`   - Created: ${totalPBIsCreated}`);\nconsole.log(`   - Updated: ${totalPBIsUpdated}`);\n\n// ─────────────────────────────────────────────────────────────────────\n// 2. CHECK IF EXCEL IS NEEDED\n// ─────────────────────────────────────────────────────────────────────\n\nif (allPBIs.length === 0) {\n  console.log(`✅ No PBIs to export`);\n  return [{\n    json: {\n      ...inputData,\n      excelUrl: null,\n      excelGenerated: false,\n      pbiCount: 0\n    }\n  }];\n}\n\nif (allPBIs.length <= 10) {\n  console.log(`✅ PBI count (${allPBIs.length}) <= 10, Excel not needed`);\n  return [{\n    json: {\n      ...inputData,\n      excelUrl: null,\n      excelGenerated: false,\n      pbiCount: allPBIs.length\n    }\n  }];\n}\n\nconsole.log(`📥 PBI count (${allPBIs.length}) > 10, generating CSV...`);\n\n// ─────────────────────────────────────────────────────────────────────\n// 3. GENERATE CSV\n// ─────────────────────────────────────────────────────────────────────\n\nlet csvContent = \"PBI ID,Title,Repository,Scan Type,Alert Count,Action,URL\\n\";\n\n// Sort by PBI ID descending (newest first)\nconst sortedPBIs = [...allPBIs].sort((a, b) => {\n  const idA = parseInt(a.id) || 0;\n  const idB = parseInt(b.id) || 0;\n  return idB - idA;\n});\n\n// Helper to escape CSV values\nfunction escapeCsv(value) {\n  if (value === null || value === undefined) return '';\n  const str = String(value);\n  if (str.includes(',') || str.includes('\"') || str.includes('\\n')) {\n    return `\"${str.replace(/\"/g, '\"\"')}\"`;\n  }\n  return str;\n}\n\n// Add rows\nfor (const pbi of sortedPBIs) {\n  csvContent += `${escapeCsv(pbi.id)},`;\n  csvContent += `${escapeCsv(pbi.title)},`;\n  csvContent += `${escapeCsv(pbi.repository || 'Unknown')},`;\n  csvContent += `${escapeCsv(pbi.scanType || 'Unknown')},`;\n  csvContent += `${escapeCsv(pbi.alertCount || 1)},`;\n  csvContent += `${escapeCsv(pbi.action || 'unknown')},`;\n  csvContent += `${escapeCsv(pbi.url)}\\n`;\n}\n\n// ─────────────────────────────────────────────────────────────────────\n// 4. PREPARE AZURE BLOB UPLOAD\n// ─────────────────────────────────────────────────────────────────────\n\nconst now = new Date();\nconst dateStr = now.toISOString().split('T')[0];\nconst filename = `PBI_List_${dateStr}.csv`;\n\nconst storageAccount = config.azureStorageAccount;\nconst containerName = config.azureContainer;\nconst storageKey = config.azureStorageKey;\n\nconst blobName = `security-scans/${filename}`;\nconst blobUrl = `https://${storageAccount}.blob.core.windows.net/${containerName}/${blobName}`;\nconst uploadUrl = `${blobUrl}?${storageKey}`;\nconst downloadUrl = uploadUrl;\n\nconsole.log(`📤 CSV prepared: ${filename}`);\nconsole.log(`📊 Contains ${sortedPBIs.length} PBIs`);\n\n// ─────────────────────────────────────────────────────────────────────\n// 5. RETURN\n// ─────────────────────────────────────────────────────────────────────\n\nreturn [{\n  json: {\n    ...inputData,\n    filename: filename,\n    content: csvContent,\n    uploadUrl: uploadUrl,\n    downloadUrl: downloadUrl,\n    blobName: blobName,\n    pbiCount: allPBIs.length,\n    excelGenerated: true,\n    excelUrl: downloadUrl\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        49920,
+        36044
+      ],
+      "id": "6715d0a3-7110-4128-a0ae-414854f840f6",
+      "name": "Generate Excel PBI List"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d894008d-e2af-4c39-81a7-c0715599b487",
+              "leftValue": "={{ $json.excelGenerated }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        50144,
+        36044
+      ],
+      "id": "241db4a9-9b83-494f-a683-33dabeb51351",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $json.uploadUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "text/csv"
+            },
+            {
+              "name": "x-ms-blob-type",
+              "value": "BlockBlob"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "value": "={{ $json.content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        50368,
+        36020
+      ],
+      "id": "5d879221-f71a-4e0c-a137-9fb86fe0335d",
+      "name": "Upload CSV to Azure Blob"
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "organization",
+              "value": "fefundinfo"
+            },
+            {
+              "name": "teamProject",
+              "value": "Precision Plus"
+            },
+            {
+              "name": "azureStorageAccount",
+              "value": "pplusautomationresult"
+            },
+            {
+              "name": "azureStorageKey"
+            },
+            {
+              "name": "azureContainer",
+              "value": "sprint-reports"
+            },
+            {
+              "name": "teamsWorkflowUrl"
+            },
+            {
+              "name": "parentFeatureUrl",
+              "value": "https://fe-tfs.visualstudio.com/Precision%20Plus/_backlogs/backlog/Precision%20Plus%20Team/Epics?workitem=528765"
+            }
+          ]
+        },
+        "options": {
+          "dotNotation": true
+        }
+      },
+      "name": "Set Sprint Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        46960,
+        35904
+      ],
+      "id": "8753dc07-8819-4734-b691-62d0de7830c0",
+      "notes": "UPDATE EVERY SPRINT:\n- sprintNumber\n- releaseVersion\n- iterationPath\n\nAZURE BLOB CONFIG:\n- azureStorageAccount: Your storage account name\n- azureStorageKey: Your storage account access key\n- azureContainer: Container name (e.g., 'sprint-reports')"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Weekly Security Scan": {
+      "main": [
+        [
+          {
+            "node": "Set Sprint Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Results",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Results": {
+      "main": [
+        [
+          {
+            "node": "Generate Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create_new_pbi": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "search_for_existing_pbi": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "update_existing_pbi": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Repo List": {
+      "main": [
+        [
+          {
+            "node": "Split Repos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine All Alerts": {
+      "main": [
+        [
+          {
+            "node": "Aggregate All Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Code Scanning": {
+      "main": [
+        [
+          {
+            "node": "Filter Code Scanning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Dependabot": {
+      "main": [
+        [
+          {
+            "node": "Filter Dependabot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Secret Scanning": {
+      "main": [
+        [
+          {
+            "node": "Filter Secret Scanning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Repos": {
+      "main": [
+        [
+          {
+            "node": "Get Code Scanning",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Dependabot",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Secret Scanning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate All Alerts": {
+      "main": [
+        [
+          {
+            "node": "Compress Alert Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_pbi_details": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compress Alert Data": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Adaptive Card": {
+      "main": [
+        [
+          {
+            "node": "Post to Teams",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Report": {
+      "main": [
+        [
+          {
+            "node": "Generate Excel PBI List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Secret Scanning": {
+      "main": [
+        [
+          {
+            "node": "Combine All Alerts",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Filter Dependabot": {
+      "main": [
+        [
+          {
+            "node": "Combine All Alerts",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Filter Code Scanning": {
+      "main": [
+        [
+          {
+            "node": "Combine All Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Excel PBI List": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Upload CSV to Azure Blob",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Adaptive Card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload CSV to Azure Blob": {
+      "main": [
+        [
+          {
+            "node": "Format Adaptive Card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Sprint Config": {
+      "main": [
+        [
+          {
+            "node": "Repo List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "eadeb328-a5b0-4968-a152-b8686252411f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "857ccbc685255d737a652c5892ef034718a3f0ab3053f36de5f8fed84a5c2ef2"
+  },
+  "id": "Wmik4DzlwZIxke1N",
+  "tags": []
+}
